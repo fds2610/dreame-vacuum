@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.vacuum import (
+    Segment,
     StateVacuumEntity,
     VacuumEntityFeature,
     ENTITY_ID_FORMAT,
@@ -1023,6 +1024,7 @@ class DreameVacuum(DreameVacuumEntity, StateVacuumEntity):
             | VacuumEntityFeature.PAUSE
             | VacuumEntityFeature.STOP
             | VacuumEntityFeature.RETURN_HOME
+            | VacuumEntityFeature.CLEAN_AREA
         )
         self._activity_class = activity_class
 
@@ -1031,7 +1033,21 @@ class DreameVacuum(DreameVacuumEntity, StateVacuumEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         self._set_attrs()
+        self._check_segments_changed()
         self.async_write_ha_state()
+
+    @callback
+    def _check_segments_changed(self) -> None:
+        """Check if segments have changed and create repair issue."""
+        last_seen = self.last_seen_segments
+        if last_seen is None:
+            return
+
+        current_ids = {seg.id for seg in self._get_segments()}
+        last_seen_ids = {seg.id for seg in last_seen}
+
+        if current_ids != last_seen_ids:
+            self.async_create_segments_issue()
 
     def _set_attrs(self):
         if self.device.status.has_error:
@@ -1159,6 +1175,62 @@ class DreameVacuum(DreameVacuumEntity, StateVacuumEntity):
             repeats,
             suction_level,
             water_volume,
+        )
+
+    def _get_segments(self) -> list[Segment]:
+        """Get the segments that can be cleaned."""
+        segments: list[Segment] = []
+        map_data_list = self.device.status.map_data_list
+        if map_data_list is None:
+            return segments
+
+        for map_data in map_data_list.values():
+            if map_data.segments is None or map_data.map_index is None:
+                continue
+
+            for segment_id, segment in map_data.segments.items():
+                if segment.visibility is False:
+                    continue
+
+                segments.append(
+                    Segment(
+                        id=f"{map_data.map_index}_{segment_id}",
+                        name=segment.name,
+                        group=map_data.map_name,
+                    )
+                )
+
+        return segments
+
+    async def async_get_segments(self) -> list[Segment]:
+        """Get the segments that can be cleaned."""
+        return self._get_segments()
+
+    async def async_clean_segments(self, segment_ids: list[str], **kwargs) -> None:
+        """Perform an area clean.
+
+        Only cleans segments from the currently selected map.
+        """
+        selected_map = self.device.status.selected_map
+        if selected_map is None or selected_map.map_index is None:
+            return
+
+        selected_map_index = selected_map.map_index
+
+        # Parse composite IDs and filter to only segments from the selected map
+        int_segment_ids: list[int] = []
+        for composite_id in segment_ids:
+            map_index_str, segment_id_str = composite_id.split("_", 1)
+            if int(map_index_str) == selected_map_index:
+                int_segment_ids.append(int(segment_id_str))
+
+        if not int_segment_ids:
+            return
+
+        await self._try_command(
+            "Unable to call clean_segment: %s",
+            self.device.clean_segment,
+            int_segment_ids,
         )
 
     async def async_goto(self, x, y) -> None:
