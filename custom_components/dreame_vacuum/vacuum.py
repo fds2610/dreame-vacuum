@@ -15,7 +15,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.vacuum import (
-    Segment,
     StateVacuumEntity,
     VacuumEntityFeature,
     ENTITY_ID_FORMAT,
@@ -156,6 +155,20 @@ from .const import (
     CONSUMABLE_ROLLER_MOP_FILTER,
     CONSUMABLE_WATER_OUTLET_FILTER,
 )
+
+try:
+    from homeassistant.components.vacuum import Segment
+except ImportError:
+    from dataclasses import dataclass
+
+    @dataclass
+    class Segment:
+        id: str
+        name: str
+        group: str | None = None
+
+
+CLEAN_AREA_ENTITY_FEATURE = getattr(VacuumEntityFeature, "CLEAN_AREA", 0)
 
 STATE_CODE_TO_STATE: Final = {
     DreameVacuumState.UNKNOWN: STATE_IDLE,
@@ -1024,7 +1037,7 @@ class DreameVacuum(DreameVacuumEntity, StateVacuumEntity):
             | VacuumEntityFeature.PAUSE
             | VacuumEntityFeature.STOP
             | VacuumEntityFeature.RETURN_HOME
-            | VacuumEntityFeature.CLEAN_AREA
+            | CLEAN_AREA_ENTITY_FEATURE
         )
         self._activity_class = activity_class
 
@@ -1033,7 +1046,8 @@ class DreameVacuum(DreameVacuumEntity, StateVacuumEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         self._set_attrs()
-        self._check_segments_changed()
+        if CLEAN_AREA_ENTITY_FEATURE:
+            self._check_segments_changed()
         self.async_write_ha_state()
 
     @callback
