@@ -1621,7 +1621,7 @@
         "locked_auto": "Automatic",
         "locked_never": "Never",
         "locked_only_touch": "Only touch",
-        "map": "Map {name}",
+        "map": "Map {{name}}",
         "map_1": "First map",
         "map_2": "Second map",
         "map_3": "Third map",
